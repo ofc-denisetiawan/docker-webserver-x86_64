@@ -1,0 +1,174 @@
+FROM php:7.1-fpm
+
+# Install packages
+RUN apt-get update && \
+    apt-get install -y \
+        wget \
+        file \
+        net-tools \
+        iputils-ping \
+        telnet \
+        git \
+        libaio1 \
+        libbz2-dev \
+        libexif-dev \
+        libfreetype6-dev \
+        libgd-dev \
+        libjpeg-dev \
+        libmagic-dev \
+        libmcrypt-dev \
+        libmemcached-dev \
+        libpcre3 \
+        libpcre3-dev\
+        libpng++-dev \
+        libpq-dev \
+        libsqlite3-dev\
+        libssl-dev \
+        libtidy-dev \
+        libvpx-dev \
+        libxml2-dev \
+        libxslt-dev \
+        libxslt1-dev \
+        libz-dev \
+        libxrender1 \
+        libxext6 \
+        libcurl4-openssl-dev \
+        re2c \
+        sqlite3 \
+        zlib1g-dev \
+        libzip-dev \
+        odbc-postgresql \
+        procps \
+        unzip \
+        zlib1g-dev \
+        libxrender1 \
+        libfontconfig1 \
+        fontconfig \
+        libxext-dev \
+        libxrender1 \
+        libfontconfig1 \
+        fontconfig \
+        fonts-liberation \
+        xfonts-75dpi \
+        xfonts-base
+
+RUN docker-php-ext-install mcrypt
+RUN docker-php-ext-install mysqli pdo pdo_mysql
+
+# Setup oci8 and pdo_oci
+ENV LD_LIBRARY_PATH="/opt/oracle/instantclient_19_6"
+ENV ORACLE_HOME="/opt/oracle/instantclient_19_6"
+ENV OCI_HOME="/opt/oracle/instantclient_19_6"
+ENV OCI_LIB_DIR="/opt/oracle/instantclient_19_6"
+ENV OCI_INCLUDE_DIR="/opt/oracle/instantclient_19_6/sdk/include"
+ENV OCI_VERSION=11
+
+# Oracle instantclient
+RUN mkdir /opt/oracle
+ADD libs/oracle/instantclient-basic-linux.x64-19.6.0.0.0dbru.zip /opt/oracle
+ADD libs/oracle/instantclient-sdk-linux.x64-19.6.0.0.0dbru.zip /opt/oracle
+RUN cd /opt/oracle && unzip instantclient-basic-linux.x64-19.6.0.0.0dbru.zip -d /opt/oracle \
+    && unzip instantclient-sdk-linux.x64-19.6.0.0.0dbru.zip -d /opt/oracle \
+    && echo /opt/oracle/instantclient_19_6 > /etc/ld.so.conf.d/oracle-instantclient.conf \
+    && ldconfig
+
+# install oci8
+RUN echo 'instantclient,/opt/oracle/instantclient_19_6' | pecl install oci8-2.2.0 \
+    && echo "extension=oci8.so" >> /usr/local/etc/php/conf.d/oci8.ini
+
+# install APCu
+RUN pecl install apcu-5.1.8 && \
+    pecl install apcu_bc-1.0.3 && \
+    docker-php-ext-enable apcu --ini-name 10-docker-php-ext-apcu.ini && \
+    docker-php-ext-enable apc --ini-name 20-docker-php-ext-apc.ini
+
+# compile igbinary extension
+RUN cd /tmp/ && git clone https://github.com/igbinary/igbinary "php-igbinary" && \
+    cd php-igbinary && \
+    phpize && \
+    ./configure && \
+    make && \
+    make install && \
+    make clean && \
+    docker-php-ext-enable igbinary
+
+# install the PHP gd library
+RUN docker-php-ext-configure gd \
+        --enable-gd-native-ttf \
+        --with-jpeg-dir=/usr/lib \
+        --with-freetype-dir=/usr/include/freetype2 && \
+    docker-php-ext-install gd
+
+# install the php memcache & memcached extension
+RUN set -x \
+    && apt-get update && apt-get install -y --no-install-recommends unzip libssl-dev libpcre3 libpcre3-dev \
+    && cd /tmp \
+    && curl -sSL -o php7.zip https://github.com/websupport-sk/pecl-memcache/archive/php7.zip \
+    && unzip php7 \
+    && cd pecl-memcache-php7 \
+    && /usr/local/bin/phpize \
+    && ./configure --with-php-config=/usr/local/bin/php-config \
+    && make \
+    && make install \
+    && echo "extension=memcache.so" > /usr/local/etc/php/conf.d/ext-memcache.ini \
+    && rm -rf /tmp/pecl-memcache-php7 php7.zip
+
+RUN curl -L -o /tmp/memcached.tar.gz "https://github.com/php-memcached-dev/php-memcached/archive/php7.tar.gz" \
+    && mkdir -p memcached \
+    && tar -C memcached -zxvf /tmp/memcached.tar.gz --strip 1 \
+    && ( \
+        cd memcached \
+        && phpize \
+        && ./configure \
+        && make -j$(nproc) \
+        && make install \
+    ) \
+    && rm -r memcached \
+    && rm /tmp/memcached.tar.gz \
+    && docker-php-ext-enable memcached
+
+RUN yes "" | pecl install msgpack-beta \
+    && echo "extension=msgpack.so" > /usr/local/etc/php/conf.d/ext-msgpack.ini
+
+RUN export CFLAGS="-I/usr/src/php" && \
+    docker-php-ext-install xmlreader xmlwriter
+
+RUN docker-php-ext-configure pdo_oci --with-pdo-oci=instantclient,/opt/oracle/instantclient_19_6,19.6 && \
+    echo "extension=pdo_oci.so" > /usr/local/etc/php/conf.d/pdo_oci.ini
+
+RUN docker-php-ext-install \
+        pdo_oci \
+        pdo \
+        pdo_mysql \
+        pdo_pgsql \
+        bcmath \
+        bz2 \
+        calendar \
+        exif \
+        gettext \
+        pcntl \
+        pdo_pgsql \
+        pgsql \
+        opcache \
+        shmop \
+        soap \
+        sockets \
+        sysvmsg \
+        sysvsem \
+        sysvshm \
+        tidy \
+        wddx \
+        xsl \
+        zip
+
+RUN docker-php-ext-enable pdo_pgsql pdo_mysql
+
+# install wkhtmltopdf ARM64 base, for x86 do your own
+RUN mkdir /opt/wkhtmltopdf
+RUN cd /opt/wkhtmltopdf \
+    && wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6-1/wkhtmltox_0.12.6-1.buster_amd64.deb \
+    && dpkg -i wkhtmltox_0.12.6-1.buster_amd64.deb \
+    && rm wkhtmltox_0.12.6-1.buster_amd64.deb
+
+# Clean up
+RUN apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

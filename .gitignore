@@ -1,0 +1,9 @@
+# ignore projects
+projects/*-react
+projects/backup
+projects/svn
+projects/git
+
+# internal things
+nginx/default.conf.internal
+nginx/nginx.conf.internal
